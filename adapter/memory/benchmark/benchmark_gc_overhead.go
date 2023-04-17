@@ -41,7 +41,10 @@ func benchmarkHTTPCacheMemoryAdapter() {
 
 	for i := 0; i < entries; i++ {
 		key, val := generateKeyValue(i, valueSize)
-		cache.Set(uint64(key), val, expiration)
+		err := cache.Set(uint64(key), val, expiration)
+		if err != nil {
+			return
+		}
 	}
 
 	firstKey, _ := generateKeyValue(1, valueSize)
@@ -65,11 +68,14 @@ func benchmarkBigCache() {
 
 	for i := 0; i < entries; i++ {
 		key, val := generateKeyValue(i, valueSize)
-		bigcache.Set(string(key), val)
+		err := bigcache.Set(string(rune(key)), val)
+		if err != nil {
+			return
+		}
 	}
 
 	firstKey, _ := generateKeyValue(1, valueSize)
-	checkFirstElement(bigcache.Get(string(firstKey)))
+	checkFirstElement(bigcache.Get(string(rune(firstKey))))
 
 	fmt.Println("GC pause for bigcache: ", gcPause())
 

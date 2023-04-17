@@ -6,6 +6,7 @@ import (
 	"time"
 
 	cache "github.com/SporkHubr/echo-http-cache"
+	"github.com/stretchr/testify/assert"
 )
 
 var a cache.Adapter
@@ -49,7 +50,8 @@ func TestSet(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			a.Set(tt.key, tt.response, time.Now().Add(1*time.Minute))
+			err := a.Set(tt.key, tt.response, time.Now().Add(1*time.Minute))
+			assert.NoError(t, err)
 		})
 	}
 }
@@ -119,7 +121,9 @@ func TestRelease(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			a.Release(tt.key)
+			err := a.Release(tt.key)
+			assert.NoError(t, err)
+
 			if _, ok := a.Get(tt.key); ok {
 				t.Errorf("memory.Release() error; key %v should not be found", tt.key)
 			}

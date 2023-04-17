@@ -32,7 +32,6 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
@@ -106,10 +105,10 @@ type Adapter interface {
 	Get(key uint64) ([]byte, bool)
 
 	// Set caches a response for a given key until an expiration date.
-	Set(key uint64, response []byte, expiration time.Time)
+	Set(key uint64, response []byte, expiration time.Time) error
 
 	// Release frees cache for a given key.
-	Release(key uint64)
+	Release(key uint64) error
 }
 
 // Middleware is the HTTP cache middleware handler.
@@ -117,20 +116,28 @@ func (client *Client) Middleware() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			if !client.isAllowedPathToCache(c.Request().URL.String()) {
-				next(c)
+				err := next(c)
+				if err != nil {
+					c.Error(err)
+				}
+
 				return nil
 			}
 			if client.cacheableMethod(c.Request().Method) {
 				sortURLParams(c.Request().URL)
 				key := generateKey(c.Request().URL.String())
 				if c.Request().Method == http.MethodPost && c.Request().Body != nil {
-					body, err := ioutil.ReadAll(c.Request().Body)
+					body, err := io.ReadAll(c.Request().Body)
 					defer c.Request().Body.Close()
 					if err != nil {
-						next(c)
+						err := next(c)
+						if err != nil {
+							c.Error(err)
+						}
+
 						return nil
 					}
-					reader := ioutil.NopCloser(bytes.NewBuffer(body))
+					reader := io.NopCloser(bytes.NewBuffer(body))
 					key = generateKeyWithBody(c.Request().URL.String(), body)
 					c.Request().Body = reader
 				}
@@ -142,26 +149,46 @@ func (client *Client) Middleware() echo.MiddlewareFunc {
 					c.Request().URL.RawQuery = params.Encode()
 					key = generateKey(c.Request().URL.String())
 
-					client.adapter.Release(key)
+					err := client.adapter.Release(key)
+					if err != nil {
+						c.Error(err)
+
+						return nil
+					}
 				} else {
 					b, ok := client.adapter.Get(key)
 					response := BytesToResponse(b)
 					if ok {
 						if response.Expiration.After(time.Now()) {
+							// update cache details about last access and usage frequency - only for in-memory cache
 							response.LastAccess = time.Now()
 							response.Frequency++
-							client.adapter.Set(key, response.Bytes(), response.Expiration)
+							err := client.adapter.Set(key, response.Bytes(), response.Expiration)
+							if err != nil {
+								c.Error(err)
 
-							//w.WriteHeader(http.StatusNotModified)
+								return nil
+							}
+
 							for k, v := range response.Header {
 								c.Response().Header().Set(k, strings.Join(v, ","))
 							}
+							// TODO: handle initial code e.g. 201, 202, they are possible here as well
 							c.Response().WriteHeader(http.StatusOK)
-							c.Response().Write(response.Value)
+							_, err = c.Response().Write(response.Value)
+							if err != nil {
+								c.Error(err)
+
+								return nil
+							}
+
 							return nil
 						}
 
-						client.adapter.Release(key)
+						err := client.adapter.Release(key)
+						if err != nil {
+							return err
+						}
 					}
 				}
 
@@ -185,13 +212,13 @@ func (client *Client) Middleware() echo.MiddlewareFunc {
 						LastAccess: now,
 						Frequency:  1,
 					}
-					client.adapter.Set(key, response.Bytes(), response.Expiration)
+					if err := client.adapter.Set(key, response.Bytes(), response.Expiration); err != nil {
+						c.Error(err)
+
+						return nil
+					}
 				}
-				//for k, v := range writer.Header() {
-				//	c.Response().Header().Set(k, strings.Join(v, ","))
-				//}
-				//c.Response().WriteHeader(statusCode)
-				//c.Response().Write(value)
+
 				return nil
 			}
 			if err := next(c); err != nil {
@@ -202,8 +229,8 @@ func (client *Client) Middleware() echo.MiddlewareFunc {
 	}
 }
 
-func (c *Client) cacheableMethod(method string) bool {
-	for _, m := range c.methods {
+func (client *Client) cacheableMethod(method string) bool {
+	for _, m := range client.methods {
 		if method == m {
 			return true
 		}
@@ -211,8 +238,8 @@ func (c *Client) cacheableMethod(method string) bool {
 	return false
 }
 
-func (c *Client) isAllowedPathToCache(URL string) bool {
-	for _, p := range c.restrictedPaths {
+func (client *Client) isAllowedPathToCache(URL string) bool {
+	for _, p := range client.restrictedPaths {
 		if strings.Contains(URL, p) {
 			return false
 		}
@@ -224,7 +251,10 @@ func (c *Client) isAllowedPathToCache(URL string) bool {
 func BytesToResponse(b []byte) Response {
 	var r Response
 	dec := gob.NewDecoder(bytes.NewReader(b))
-	dec.Decode(&r)
+	err := dec.Decode(&r)
+	if err != nil {
+		return Response{}
+	}
 
 	return r
 }
@@ -233,7 +263,10 @@ func BytesToResponse(b []byte) Response {
 func (r Response) Bytes() []byte {
 	var b bytes.Buffer
 	enc := gob.NewEncoder(&b)
-	enc.Encode(&r)
+	err := enc.Encode(&r)
+	if err != nil {
+		return nil
+	}
 
 	return b.Bytes()
 }

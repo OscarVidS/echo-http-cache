@@ -2,6 +2,7 @@ package main
 
 import (
 	"math/rand"
+	"strconv"
 	"testing"
 	"time"
 
@@ -15,14 +16,20 @@ const maxEntrySize = 256
 func BenchmarkHTTPCacheMamoryAdapterSet(b *testing.B) {
 	cache, expiration := initHTTPCacheMamoryAdapter(b.N)
 	for i := 0; i < b.N; i++ {
-		cache.Set(uint64(i), value(), expiration)
+		err := cache.Set(uint64(i), value(), expiration)
+		if err != nil {
+			return
+		}
 	}
 }
 
 func BenchmarkBigCacheSet(b *testing.B) {
 	cache := initBigCache(b.N)
 	for i := 0; i < b.N; i++ {
-		cache.Set(string(i), value())
+		err := cache.Set(string(rune(i)), value())
+		if err != nil {
+			return
+		}
 	}
 }
 
@@ -30,7 +37,10 @@ func BenchmarkHTTPCacheMamoryAdapterGet(b *testing.B) {
 	b.StopTimer()
 	cache, expiration := initHTTPCacheMamoryAdapter(b.N)
 	for i := 0; i < b.N; i++ {
-		cache.Set(uint64(i), value(), expiration)
+		err := cache.Set(uint64(i), value(), expiration)
+		if err != nil {
+			return
+		}
 	}
 
 	b.StartTimer()
@@ -43,12 +53,18 @@ func BenchmarkBigCacheGet(b *testing.B) {
 	b.StopTimer()
 	cache := initBigCache(b.N)
 	for i := 0; i < b.N; i++ {
-		cache.Set(string(i), value())
+		err := cache.Set(string(rune(i)), value())
+		if err != nil {
+			return
+		}
 	}
 
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
-		cache.Get(string(i))
+		_, err := cache.Get(string(rune(i)))
+		if err != nil {
+			return
+		}
 	}
 }
 
@@ -60,7 +76,10 @@ func BenchmarkHTTPCacheMamoryAdapterSetParallel(b *testing.B) {
 		id := rand.Intn(1000)
 		counter := 0
 		for pb.Next() {
-			cache.Set(parallelKey(id, counter), value(), expiration)
+			err := cache.Set(parallelKey(id, counter), value(), expiration)
+			if err != nil {
+				return
+			}
 			counter = counter + 1
 		}
 	})
@@ -74,7 +93,10 @@ func BenchmarkBigCacheSetParallel(b *testing.B) {
 		id := rand.Intn(1000)
 		counter := 0
 		for pb.Next() {
-			cache.Set(string(parallelKey(id, counter)), value())
+			err := cache.Set(strconv.FormatUint(parallelKey(id, counter), 10), value())
+			if err != nil {
+				return
+			}
 			counter = counter + 1
 		}
 	})
@@ -84,7 +106,10 @@ func BenchmarkHTTPCacheMemoryAdapterGetParallel(b *testing.B) {
 	b.StopTimer()
 	cache, expiration := initHTTPCacheMamoryAdapter(b.N)
 	for i := 0; i < b.N; i++ {
-		cache.Set(uint64(i), value(), expiration)
+		err := cache.Set(uint64(i), value(), expiration)
+		if err != nil {
+			return
+		}
 	}
 
 	b.StartTimer()
@@ -101,14 +126,20 @@ func BenchmarkBigCacheGetParallel(b *testing.B) {
 	b.StopTimer()
 	cache := initBigCache(b.N)
 	for i := 0; i < b.N; i++ {
-		cache.Set(string(i), value())
+		err := cache.Set(string(rune(i)), value())
+		if err != nil {
+			return
+		}
 	}
 
 	b.StartTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		counter := 0
 		for pb.Next() {
-			cache.Get(string(counter))
+			_, err := cache.Get(string(rune(counter)))
+			if err != nil {
+				return
+			}
 			counter = counter + 1
 		}
 	})
