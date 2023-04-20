@@ -10,7 +10,7 @@ The memory adapter minimizes GC overhead to near zero and supports some options 
 ## Getting Started
 
 ### Installation (Go Modules)
-`go get github.com/SporkHubr/echo-http-cache`
+`go get github.com/brainly/echo-http-cache`
 
 ### Usage
 This is an example of use with the memory adapter:
