@@ -63,13 +63,22 @@ type Response struct {
 	Frequency int
 }
 
+type Path struct {
+	Method   string
+	Path     string
+	Duration time.Duration
+}
+
+func (p Path) PathName() string {
+	return fmt.Sprintf("%s %s", p.Method, p.Path)
+}
+
 // Client data structure for HTTP cache middleware.
 type Client struct {
-	adapter         Adapter
-	ttl             time.Duration
-	refreshKey      string
-	methods         []string
-	restrictedPaths []string
+	adapter    Adapter
+	refreshKey string
+	methods    []string
+	paths      []Path
 }
 
 type bodyDumpResponseWriter struct {
@@ -115,7 +124,8 @@ type Adapter interface {
 func (client *Client) Middleware() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
-			if !client.isAllowedPathToCache(c.Request().URL.String()) {
+			expiration := client.pathExpirationTime(getPathName(c))
+			if expiration == nil {
 				err := next(c)
 				if err != nil {
 					c.Error(err)
@@ -123,9 +133,10 @@ func (client *Client) Middleware() echo.MiddlewareFunc {
 
 				return nil
 			}
+
 			if client.cacheableMethod(c.Request().Method) {
 				sortURLParams(c.Request().URL)
-				key := generateKey(c.Request().URL.String())
+				key := generateKey(c.Request().Method, c.Request().URL.String())
 				if c.Request().Method == http.MethodPost && c.Request().Body != nil {
 					body, err := io.ReadAll(c.Request().Body)
 					defer c.Request().Body.Close()
@@ -147,7 +158,7 @@ func (client *Client) Middleware() echo.MiddlewareFunc {
 					delete(params, client.refreshKey)
 
 					c.Request().URL.RawQuery = params.Encode()
-					key = generateKey(c.Request().URL.String())
+					key = generateKey(c.Request().Method, c.Request().URL.String())
 
 					err := client.adapter.Release(key)
 					if err != nil {
@@ -205,10 +216,23 @@ func (client *Client) Middleware() echo.MiddlewareFunc {
 				if statusCode < 400 {
 					now := time.Now()
 
+					var ttl time.Duration
+					if expiration == nil {
+						// there is no cache for this endpoint
+						if err := next(c); err != nil {
+							c.Error(err)
+						}
+
+						return nil
+					}
+
+					// set cache for particular endpoint
+					ttl = *expiration
+
 					response := Response{
 						Value:      value,
 						Header:     writer.Header(),
-						Expiration: now.Add(client.ttl),
+						Expiration: now.Add(ttl),
 						LastAccess: now,
 						Frequency:  1,
 					}
@@ -238,13 +262,25 @@ func (client *Client) cacheableMethod(method string) bool {
 	return false
 }
 
-func (client *Client) isAllowedPathToCache(URL string) bool {
-	for _, p := range client.restrictedPaths {
-		if strings.Contains(URL, p) {
-			return false
+// "0" means no cache
+func (client *Client) pathExpirationTime(path string) *time.Duration {
+	for _, p := range client.paths {
+		// e.g. GET /v1/markets/:marketCode/questions == POST /v1/markets/:marketCode/questions
+		if strings.Contains(path, p.PathName()) {
+			return &p.Duration
 		}
 	}
-	return true
+
+	return nil
+}
+
+func getPathName(c echo.Context) string {
+	if c.Path() != "" {
+		// get route from context if exists e.g. /v2/questions/:id
+		return fmt.Sprintf("%s %s", c.Request().Method, c.Path())
+	}
+
+	return fmt.Sprintf("%s %s", c.Request().Method, c.Request().URL.Path)
 }
 
 // BytesToResponse converts bytes array into Response data structure.
@@ -286,9 +322,9 @@ func KeyAsString(key uint64) string {
 	return strconv.FormatUint(key, 36)
 }
 
-func generateKey(URL string) uint64 {
+func generateKey(method, URL string) uint64 {
 	hash := fnv.New64a()
-	hash.Write([]byte(URL))
+	hash.Write([]byte(method + URL))
 
 	return hash.Sum64()
 }
@@ -315,8 +351,8 @@ func NewClient(opts ...ClientOption) (*Client, error) {
 	if c.adapter == nil {
 		return nil, errors.New("cache client adapter is not set")
 	}
-	if int64(c.ttl) < 1 {
-		return nil, errors.New("cache client ttl is not set")
+	if len(c.paths) < 1 {
+		return nil, errors.New("at least one path is required")
 	}
 	if c.methods == nil {
 		c.methods = []string{http.MethodGet}
@@ -330,19 +366,6 @@ func NewClient(opts ...ClientOption) (*Client, error) {
 func ClientWithAdapter(a Adapter) ClientOption {
 	return func(c *Client) error {
 		c.adapter = a
-		return nil
-	}
-}
-
-// ClientWithTTL sets how long each response is going to be cached.
-func ClientWithTTL(ttl time.Duration) ClientOption {
-	return func(c *Client) error {
-		if int64(ttl) < 1 {
-			return fmt.Errorf("cache client ttl %v is invalid", ttl)
-		}
-
-		c.ttl = ttl
-
 		return nil
 	}
 }
@@ -370,11 +393,11 @@ func ClientWithMethods(methods []string) ClientOption {
 	}
 }
 
-// ClientWithRestrictedPaths sets the restricted HTTP paths for caching.
+// ClientWithPaths sets the custom timeouts for particular endpoints.
 // Optional setting.
-func ClientWithRestrictedPaths(paths []string) ClientOption {
+func ClientWithPaths(values []Path) ClientOption {
 	return func(c *Client) error {
-		c.restrictedPaths = paths
+		c.paths = values
 		return nil
 	}
 }

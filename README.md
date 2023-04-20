@@ -1,11 +1,16 @@
 # echo-http-cache
-[![Build Status](https://travis-ci.org/victorspringer/http-cache.svg?branch=master)](https://travis-ci.org/victorspringer/http-cache) [![Coverage Status](https://coveralls.io/repos/github/victorspringer/http-cache/badge.svg?branch=master)](https://coveralls.io/github/victorspringer/http-cache?branch=master) [![](https://img.shields.io/badge/godoc-reference-5272B4.svg?style=flat)](https://godoc.org/github.com/SporkHubr/echo-http-cache)
 
 This is a high performance Golang HTTP middleware for server-side application layer caching, ideal for REST APIs, using Echo framework.
 
 It is simple, super fast, thread safe and gives the possibility to choose the adapter (memory, Redis, DynamoDB etc).
 
 The memory adapter minimizes GC overhead to near zero and supports some options of caching algorithms (LRU, MRU, LFU, MFU). This way, it is able to store plenty of gigabytes of responses, keeping great performance and being free of leaks.
+
+Forked from https://github.com/SporkHubr/echo-http-cache
+
+### Main changes:
+- Error handling for adapters
+- Cache expiration per endpoint
 
 ## Getting Started
 
@@ -23,7 +28,7 @@ import (
     "net/http"
     "os"
     "time"
-    
+
     "github.com/SporkHubr/echo-http-cache"
     "github.com/SporkHubr/echo-http-cache/adapter/memory"
     "github.com/labstack/echo/v4"
@@ -45,8 +50,19 @@ func main() {
 
     cacheClient, err := cache.NewClient(
         cache.ClientWithAdapter(memcached),
-        cache.ClientWithTTL(10 * time.Minute),
         cache.ClientWithRefreshKey("opn"),
+		cache.ClientWithPaths([]cache.Path{
+			{
+				Method:   "GET",
+				Path:     "/v1/markets/:marketCode/popular-questions",
+				Duration: 1 * time.Hour,
+			},
+			{
+				Method:   "POST",
+				Path:     "/v1/markets/:marketCode/related-questions/search",
+				Duration: 1 * time.Hour,
+			},
+		}),
     )
     if err != nil {
         fmt.Println(err)
@@ -78,6 +94,18 @@ import (
         cache.ClientWithAdapter(redis.NewAdapter(ringOpt)),
         cache.ClientWithTTL(10 * time.Minute),
         cache.ClientWithRefreshKey("opn"),
+        cache.ClientWithPaths([]cache.Path{
+            {
+                Method:   "GET",
+                Path:     "/v1/markets/:marketCode/popular-questions",
+                Duration: 1 * time.Hour,
+            },
+            {
+                Method:   "POST",
+                Path:     "/v1/markets/:marketCode/related-questions/search",
+                Duration: 1 * time.Hour,
+            },
+        }),
     )
 
 ...

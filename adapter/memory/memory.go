@@ -76,7 +76,6 @@ func (a *Adapter) Get(key uint64) ([]byte, bool) {
 
 // Set implements the cache Adapter interface Set method.
 func (a *Adapter) Set(key uint64, response []byte, expiration time.Time) error {
-	fmt.Println("Debug SET")
 	a.mutex.RLock()
 	length := len(a.store)
 	a.mutex.RUnlock()

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -29,6 +30,7 @@ func (a *adapterMock) Get(key uint64) ([]byte, bool) {
 	if _, ok := a.store[key]; ok {
 		return a.store[key], true
 	}
+
 	return nil, false
 }
 
@@ -36,6 +38,17 @@ func (a *adapterMock) Set(key uint64, response []byte, expiration time.Time) err
 	a.Lock()
 	defer a.Unlock()
 	a.store[key] = response
+
+	// remove key from map after expiration
+	go func() {
+		time.Sleep(time.Until(expiration))
+		fmt.Println("delete")
+
+		err := a.Release(key)
+		if err != nil {
+			panic(err)
+		}
+	}()
 
 	return nil
 }
@@ -60,30 +73,43 @@ func TestMiddleware(t *testing.T) {
 
 	adapter := &adapterMock{
 		store: map[uint64][]byte{
-			14974843192121052621: Response{
+			6343178579234359543: Response{
 				Value:      []byte("value 1"),
 				Expiration: time.Now().Add(1 * time.Minute),
 			}.Bytes(),
-			14974839893586167988: Response{
+			6343179678745987754: Response{
 				Value:      []byte("value 2"),
 				Expiration: time.Now().Add(1 * time.Minute),
-			}.Bytes(),
-			14974840993097796199: Response{
-				Value:      []byte("value 3"),
-				Expiration: time.Now().Add(-1 * time.Minute),
-			}.Bytes(),
-			10956846073361780255: Response{
-				Value:      []byte("value 4"),
-				Expiration: time.Now().Add(-1 * time.Minute),
 			}.Bytes(),
 		},
 	}
 
 	client, _ := NewClient(
 		ClientWithAdapter(adapter),
-		ClientWithTTL(1*time.Minute),
 		ClientWithRefreshKey("rk"),
 		ClientWithMethods([]string{http.MethodGet, http.MethodPost}),
+		ClientWithPaths([]Path{
+			{
+				Method:   "GET",
+				Path:     "/test-1",
+				Duration: 1 * time.Minute,
+			},
+			{
+				Method:   "GET",
+				Path:     "/test-2",
+				Duration: 1 * time.Minute,
+			},
+			{
+				Method:   "POST",
+				Path:     "/test-2",
+				Duration: 1 * time.Minute,
+			},
+			{
+				Method:   "GET",
+				Path:     "/test-3",
+				Duration: 1 * time.Minute,
+			},
+		}),
 	)
 
 	handler := client.Middleware()(httpTestHandler)
@@ -214,7 +240,6 @@ func TestMiddleware(t *testing.T) {
 				}
 			}
 
-			w := httptest.NewRecorder()
 			e := echo.New()
 			rec := httptest.NewRecorder()
 			c := e.NewContext(r, rec)
@@ -222,12 +247,124 @@ func TestMiddleware(t *testing.T) {
 			err = handler(c)
 			assert.Nil(t, err)
 
-			if !reflect.DeepEqual(w.Code, tt.wantCode) {
-				t.Errorf("*Client.Middleware() = %v, want %v", w.Code, tt.wantCode)
+			if !reflect.DeepEqual(rec.Code, tt.wantCode) {
+				t.Errorf("*Client.Middleware() = %v, want %v", rec.Code, tt.wantCode)
 				return
 			}
 			if !reflect.DeepEqual(rec.Body.String(), tt.wantBody) {
-				t.Errorf("*Client.Middleware() = %v, want %v", w.Body.String(), tt.wantBody)
+				t.Errorf("*Client.Middleware() = %v, want %v", rec.Body.String(), tt.wantBody)
+			}
+		})
+	}
+}
+
+func TestMiddlewareWithTimeout(t *testing.T) {
+	counter := 0
+	httpTestHandler := echo.HandlerFunc(func(c echo.Context) error {
+		return c.String(http.StatusOK, fmt.Sprintf("new value %v", counter))
+	})
+
+	adapter := &adapterMock{
+		store: map[uint64][]byte{
+			7857226346139777655: Response{
+				Value:      []byte("value 1"),
+				Expiration: time.Now().Add(100 * time.Millisecond),
+			}.Bytes(),
+			8208030559202060493: Response{
+				Value:      []byte("value 2"),
+				Expiration: time.Now().Add(100 * time.Millisecond),
+			}.Bytes(),
+		},
+	}
+
+	client, _ := NewClient(
+		ClientWithAdapter(adapter),
+		ClientWithRefreshKey("rk"),
+		ClientWithMethods([]string{http.MethodGet, http.MethodPost}),
+		ClientWithPaths([]Path{
+			{
+				Method:   "GET",
+				Path:     "/path-with-timeout",
+				Duration: 1000000 * time.Millisecond,
+			},
+			{
+				Method:   "POST",
+				Path:     "/path-with-timeout",
+				Duration: 100000 * time.Millisecond,
+			},
+		}),
+	)
+
+	handler := client.Middleware()(httpTestHandler)
+
+	tests := []struct {
+		name     string
+		url      string
+		method   string
+		body     []byte
+		delay    time.Duration
+		wantBody string
+		wantCode int
+	}{
+		{
+			"returns cached response for GET",
+			"http://foo.bar/path-with-timeout",
+			"GET",
+			nil,
+			50 * time.Millisecond,
+			"value 1",
+			200,
+		},
+		{
+			"returns cached response for POST",
+			"http://foo.bar/path-with-timeout",
+			"POST",
+			nil,
+			0,
+			"value 2",
+			200,
+		},
+		{
+			"returns response with expired cache",
+			"http://foo.bar/path-with-timeout/1s",
+			"GET",
+			nil,
+			100 * time.Millisecond,
+			"new value 3",
+			200,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			counter++
+			var r *http.Request
+			var err error
+
+			reader := bytes.NewReader(tt.body)
+			r, err = http.NewRequest(tt.method, tt.url, reader)
+			if err != nil {
+				t.Error(err)
+
+				return
+			}
+
+			e := echo.New()
+			rec := httptest.NewRecorder()
+			c := e.NewContext(r, rec)
+
+			// wait some time for removing item from cache
+			time.Sleep(tt.delay)
+
+			err = handler(c)
+			assert.Nil(t, err)
+
+			if !reflect.DeepEqual(rec.Code, tt.wantCode) {
+				t.Errorf("*Client.Middleware() = %v, want %v", rec.Code, tt.wantCode)
+				return
+			}
+			if !reflect.DeepEqual(rec.Body.String(), tt.wantBody) {
+				t.Errorf("*Client.Middleware() = %v, want %v", rec.Body.String(), tt.wantBody)
 			}
 		})
 	}
@@ -318,14 +455,15 @@ func TestSortURLParams(t *testing.T) {
 
 func TestGenerateKeyString(t *testing.T) {
 	urls := []string{
-		"http://localhost:8080/category",
-		"http://localhost:8080/category/morisco",
-		"http://localhost:8080/category/mourisquinho",
+		"GET http://localhost:8080/category",
+		"GET http://localhost:8080/category/morisco",
+		"GET http://localhost:8080/category/mourisquinho",
 	}
 
 	keys := make(map[string]string, len(urls))
 	for _, u := range urls {
-		rawKey := generateKey(u)
+		split := strings.Split(u, " ")
+		rawKey := generateKey(split[0], u)
 		key := KeyAsString(rawKey)
 
 		if otherURL, found := keys[key]; found {
@@ -337,29 +475,33 @@ func TestGenerateKeyString(t *testing.T) {
 
 func TestGenerateKey(t *testing.T) {
 	tests := []struct {
-		name string
-		URL  string
-		want uint64
+		name   string
+		method string
+		URL    string
+		want   uint64
 	}{
 		{
 			"get url checksum",
+			"GET",
 			"http://foo.bar/test-1",
-			14974843192121052621,
+			6343178579234359543,
 		},
 		{
 			"get url 2 checksum",
+			"GET",
 			"http://foo.bar/test-2",
-			14974839893586167988,
+			6343179678745987754,
 		},
 		{
 			"get url 3 checksum",
+			"GET",
 			"http://foo.bar/test-3",
-			14974840993097796199,
+			6343180778257615965,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := generateKey(tt.URL); got != tt.want {
+			if got := generateKey(tt.method, tt.URL); got != tt.want {
 				t.Errorf("generateKey() = %v, want %v", got, tt.want)
 			}
 		})
@@ -404,6 +546,14 @@ func TestGenerateKeyWithBody(t *testing.T) {
 func TestNewClient(t *testing.T) {
 	adapter := &adapterMock{}
 
+	paths := []Path{
+		{
+			Method:   "GET",
+			Path:     "/v1/something",
+			Duration: 1 * time.Second,
+		},
+	}
+
 	tests := []struct {
 		name    string
 		opts    []ClientOption
@@ -414,14 +564,14 @@ func TestNewClient(t *testing.T) {
 			"returns new client",
 			[]ClientOption{
 				ClientWithAdapter(adapter),
-				ClientWithTTL(1 * time.Millisecond),
 				ClientWithMethods([]string{http.MethodGet, http.MethodPost}),
+				ClientWithPaths(paths),
 			},
 			&Client{
 				adapter:    adapter,
-				ttl:        1 * time.Millisecond,
 				refreshKey: "",
 				methods:    []string{http.MethodGet, http.MethodPost},
+				paths:      paths,
 			},
 			false,
 		},
@@ -429,14 +579,14 @@ func TestNewClient(t *testing.T) {
 			"returns new client with refresh key",
 			[]ClientOption{
 				ClientWithAdapter(adapter),
-				ClientWithTTL(1 * time.Millisecond),
 				ClientWithRefreshKey("rk"),
+				ClientWithPaths(paths),
 			},
 			&Client{
 				adapter:    adapter,
-				ttl:        1 * time.Millisecond,
 				refreshKey: "rk",
 				methods:    []string{http.MethodGet},
+				paths:      paths,
 			},
 			false,
 		},
@@ -451,7 +601,6 @@ func TestNewClient(t *testing.T) {
 		{
 			"returns error",
 			[]ClientOption{
-				ClientWithTTL(1 * time.Millisecond),
 				ClientWithRefreshKey("rk"),
 			},
 			nil,
@@ -461,7 +610,6 @@ func TestNewClient(t *testing.T) {
 			"returns error",
 			[]ClientOption{
 				ClientWithAdapter(adapter),
-				ClientWithTTL(0),
 				ClientWithRefreshKey("rk"),
 			},
 			nil,
@@ -471,7 +619,6 @@ func TestNewClient(t *testing.T) {
 			"returns error",
 			[]ClientOption{
 				ClientWithAdapter(adapter),
-				ClientWithTTL(1 * time.Millisecond),
 				ClientWithMethods([]string{http.MethodGet, http.MethodPut}),
 			},
 			nil,
