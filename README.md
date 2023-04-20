@@ -6,7 +6,7 @@ It is simple, super fast, thread safe and gives the possibility to choose the ad
 
 The memory adapter minimizes GC overhead to near zero and supports some options of caching algorithms (LRU, MRU, LFU, MFU). This way, it is able to store plenty of gigabytes of responses, keeping great performance and being free of leaks.
 
-Forked from https://github.com/SporkHubr/echo-http-cache
+Forked from https://github.com/brainly/echo-http-cache
 
 ### Main changes:
 - Error handling for adapters
@@ -15,7 +15,7 @@ Forked from https://github.com/SporkHubr/echo-http-cache
 ## Getting Started
 
 ### Installation (Go Modules)
-`go get github.com/SporkHubr/echo-http-cache`
+`go get github.com/brainly/echo-http-cache`
 
 ### Usage
 This is an example of use with the memory adapter:
@@ -29,8 +29,8 @@ import (
     "os"
     "time"
 
-    "github.com/SporkHubr/echo-http-cache"
-    "github.com/SporkHubr/echo-http-cache/adapter/memory"
+    "github.com/brainly/echo-http-cache"
+    "github.com/brainly/echo-http-cache/adapter/memory"
     "github.com/labstack/echo/v4"
 )
 
@@ -79,8 +79,8 @@ func main() {
 Example of Client initialization with Redis adapter:
 ```go
 import (
-    "github.com/SporkHubr/echo-http-cache"
-    "github.com/SporkHubr/echo-http-cache/adapter/redis"
+    "github.com/brainly/echo-http-cache"
+    "github.com/brainly/echo-http-cache/adapter/redis"
 )
 
 ...
@@ -155,9 +155,9 @@ echo-http-cache memory adapter takes way less GC pause time, that means smaller 
 - Develop MongoDB adapter
 
 ## Godoc Reference
-- [echo-http-cache](https://pkg.go.dev/github.com/SporkHubr/echo-http-cache)
-- [Memory adapter](https://pkg.go.dev/github.com/SporkHubr/echo-http-cache/adapter/memory)
-- [Redis adapter](https://pkg.go.dev/github.com/SporkHubr/echo-http-cache/adapter/redis)
+- [echo-http-cache](https://pkg.go.dev/github.com/brainly/echo-http-cache)
+- [Memory adapter](https://pkg.go.dev/github.com/brainly/echo-http-cache/adapter/memory)
+- [Redis adapter](https://pkg.go.dev/github.com/brainly/echo-http-cache/adapter/redis)
 
 ## License
-echo-http-cache is released under the [MIT License](https://github.com/SporkHubr/echo-http-cache/blob/master/LICENSE).
+echo-http-cache is released under the [MIT License](https://github.com/brainly/echo-http-cache/blob/master/LICENSE).

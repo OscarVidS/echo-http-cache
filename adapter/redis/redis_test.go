@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	cache "github.com/SporkHubr/echo-http-cache"
+	cache "github.com/brainly/echo-http-cache"
 	"github.com/stretchr/testify/assert"
 )
 

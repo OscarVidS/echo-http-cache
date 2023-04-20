@@ -28,9 +28,9 @@ import (
 	"context"
 	"time"
 
-	cache "github.com/SporkHubr/echo-http-cache"
+	cache "github.com/brainly/echo-http-cache"
 	redisCache "github.com/go-redis/cache/v9"
-	"github.com/redis/go-redis/v9"
+	"github.com/go-redis/redis"
 )
 
 // Adapter is the memory adapter data structure.

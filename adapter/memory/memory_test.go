@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	cache "github.com/SporkHubr/echo-http-cache"
+	cache "github.com/brainly/echo-http-cache"
 )
 
 func TestGet(t *testing.T) {
